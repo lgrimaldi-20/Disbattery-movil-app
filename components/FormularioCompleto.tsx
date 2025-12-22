@@ -1,35 +1,45 @@
-  // Sincronizar historial de rutas con puntosVisita y fecha actual
-  useEffect(() => {
-    // Obtener fecha actual en formato YYYY-MM-DD
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const todayKey = `${yyyy}-${mm}-${dd}`;
-
-    // Contar visitas completadas hoy
-    const completadas = puntosVisita.filter(p => p.status === 'completed');
-    setHistorialRutas((prev) => {
-      // Si ya existe el día, actualizarlo
-      const otrosDias = prev.filter(r => r.id !== todayKey);
-      if (completadas.length > 0) {
-        return [
-          ...otrosDias,
-          {
-            id: todayKey,
-            nombre: todayKey,
-            fecha: todayKey,
-            visitas: completadas.length,
-            puntos: completadas,
-            status: 'completada',
-          },
-        ];
-      } else {
-        // Si no hay visitas completadas hoy, eliminar el día del historial
-        return otrosDias;
+// Escuchar en tiempo real los clientes asignados desde la colección 'asignacionesRuta' (admin)
+const escucharClientesAsignados = (userEmail: string, userName: string, setMiRuta: any) => {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const todayKey = `${yyyy}-${mm}-${dd}`;
+  return onSnapshot(collection(db, 'asignacionesRuta'), async (asignacionesSnap) => {
+    let asignadosHoy: string[] = [];
+    asignacionesSnap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (
+        (data.usuario === userEmail || data.usuario === userName) &&
+        data.fecha === todayKey &&
+        Array.isArray(data.clientes)
+      ) {
+        asignadosHoy = data.clientes as string[];
       }
     });
-  }, [puntosVisita]);
+    if (asignadosHoy && asignadosHoy.length > 0) {
+      const clientesSnap = await getDocs(collection(db, 'clientes'));
+      const clientesAsignados: any[] = [];
+      clientesSnap.forEach(docSnap => {
+        if (asignadosHoy.includes(docSnap.id)) {
+          clientesAsignados.push({ id: docSnap.id, ...docSnap.data() });
+        }
+      });
+      setMiRuta((prev: any[]) => {
+        const yaEstan = prev.filter(c => (c.fecha ? c.fecha.substring(0,10) : todayKey) === todayKey).map(c => c.id);
+        const nuevos = clientesAsignados.filter((c: any) => !yaEstan.includes(c.id)).map((c: any) => ({
+          id: c.id,
+          nombre: c.nombre,
+          direccion: c.direccion,
+          tipo: c.tipo,
+          status: 'pending',
+          fecha: todayKey,
+        }));
+        return [...prev, ...nuevos];
+      });
+    }
+  });
+};
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -43,28 +53,30 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
-
-import { db } from '../firebaseConfig';
-import { collection, getDocs, addDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+
+import { db } from '../firebaseConfig';
+import { collection, getDocs, addDoc, setDoc, doc, onSnapshot } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
 import { saveData, getData } from '../hooks/use-offline-storage';
 
 // Types
+
 interface VisitPoint {
   id: string;
   clientName: string;
   location: string;
   estimatedTime: number;
-  status: 'pending' | 'in-progress' | 'completed';
+  status: 'pending' | 'in-progress' | 'completed' | string;
+  fecha?: string;
   rif?: string;
   tipo?: string;
   direccion?: string;
   nombre?: string;
 }
+
 
 interface Ruta {
   id: string;
@@ -72,6 +84,7 @@ interface Ruta {
   fecha?: string;
   status?: string;
   puntos?: any[];
+  clientName?: string;
 }
 
 interface Cliente {
@@ -82,7 +95,8 @@ interface Cliente {
   tipo: string;
 }
 
-export default function FormularioCompleto() {
+
+export default function FormularioCompleto({ darkMode = false }: { darkMode?: boolean }) {
   // User info
   const [userName, setUserName] = useState('');
   const [groupName] = useState('GRUPO VICTORIA');
@@ -97,6 +111,71 @@ export default function FormularioCompleto() {
   const [historialRutas, setHistorialRutas] = useState<Ruta[]>([]);
   const [prospectos, setProspectos] = useState<Cliente[]>([]);
   const [clientesFirebase, setClientesFirebase] = useState<Cliente[]>([]);
+
+  // Sincronizar historial de rutas con puntosVisita y fecha actual y guardar en Firestore
+  const syncAndSaveHistorial = async () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayKey = `${yyyy}-${mm}-${dd}`;
+
+    const todosClientes = [
+      ...miRuta.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey),
+      ...puntosVisita.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey && !miRuta.some(m => m.id === p.id))
+    ];
+    const completadas = todosClientes.filter(p => p.status === 'completed' || p.status === 'completada');
+    const totalHoy = todosClientes.length;
+    const diaCompletado = totalHoy > 0 && completadas.length === totalHoy;
+
+    // Actualizar historial y estado visual inmediato
+    let nuevoHistorial = historialRutas ? [...historialRutas] : [];
+    const idxHoy = nuevoHistorial.findIndex(r => r.id === todayKey);
+    let statusHoy = 'pendiente';
+    if (totalHoy > 0) {
+      if (completadas.length === totalHoy) {
+        statusHoy = 'completada';
+      } else if (completadas.length > 0) {
+        statusHoy = 'en-progreso';
+      } else {
+        statusHoy = 'en-progreso'; // Si hay clientes pero ninguno completado, igual es "en progreso"
+      }
+      const nuevoRegistro = {
+        id: todayKey,
+        nombre: todayKey,
+        fecha: todayKey,
+        visitas: completadas.length,
+        puntos: todosClientes,
+        status: statusHoy,
+      };
+      if (idxHoy >= 0) {
+        nuevoHistorial[idxHoy] = nuevoRegistro;
+      } else {
+        nuevoHistorial.push(nuevoRegistro);
+      }
+      setHistorialRutas([...nuevoHistorial]);
+      try {
+        await setDoc(doc(db, 'historialRutas', todayKey), nuevoRegistro);
+      } catch (e) {
+        console.error('Error guardando historial en Firestore', e);
+      }
+    } else if (idxHoy >= 0) {
+      // Si ya no hay visitas hoy, eliminar el registro del día
+      nuevoHistorial.splice(idxHoy, 1);
+      setHistorialRutas([...nuevoHistorial]);
+      try {
+        await setDoc(doc(db, 'historialRutas', todayKey), {});
+      } catch (e) {
+        console.error('Error eliminando historial en Firestore', e);
+      }
+    }
+    // Recargar historial desde Firestore para mantener sincronía visual
+    cargarHistorialRutas();
+  };
+
+  useEffect(() => {
+    syncAndSaveHistorial();
+  }, [miRuta, puntosVisita]);
 
   const [nuevoProspecto, setNuevoProspecto] = useState({
     nombre: '',
@@ -178,9 +257,9 @@ export default function FormularioCompleto() {
       if (clientes.length === 0) {
         setErrores((prev) => [...prev, 'No se encontraron clientes en Firestore.']);
       }
-    } catch (e) {
+    } catch (e: any) {
       setClientesFirebase([]);
-      setErrores((prev) => [...prev, 'Error al cargar clientes: ' + (e?.message || e)]);
+      setErrores((prev) => [...prev, 'Error al cargar clientes: ' + (e && e.message ? e.message : String(e))]);
       console.error('Error al cargar clientes:', e);
     }
   };
@@ -209,14 +288,24 @@ export default function FormularioCompleto() {
 
   useEffect(() => {
     const auth = getAuth();
+    let unsubscribeAsignaciones: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        setUserName(user.displayName || user.email || 'Usuario');
+        const email = user.email || '';
+        const displayName = user.displayName || email || 'Usuario';
+        setUserName(displayName);
+        // Escuchar clientes asignados desde admin en tiempo real
+        if (unsubscribeAsignaciones) unsubscribeAsignaciones();
+        unsubscribeAsignaciones = escucharClientesAsignados(email, displayName, setMiRuta);
       } else {
         setUserName('');
+        if (unsubscribeAsignaciones) unsubscribeAsignaciones();
       }
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (unsubscribeAsignaciones) unsubscribeAsignaciones();
+    };
   }, []);
 
   // ----- FUNCIONES -----
@@ -224,7 +313,7 @@ export default function FormularioCompleto() {
   // Al seleccionar un cliente, lo agrega a la ruta (puntosVisita) si no está ya
   const seleccionarCliente = (cliente: any) => {
     setClienteSeleccionado(cliente);
-    // Evitar duplicados
+    // Evitar duplicados en puntosVisita
     setPuntosVisita((prev) => {
       if (prev.some((c) => c.id === cliente.id)) return prev;
       // Adaptar a estructura VisitPoint
@@ -237,8 +326,22 @@ export default function FormularioCompleto() {
         status: 'pending',
         location: cliente.direccion,
         estimatedTime: 30,
+        fecha: new Date().toISOString(),
       };
       return [...prev, nuevoPunto];
+    });
+    // Evitar duplicados en miRuta
+    setMiRuta((prev) => {
+      if (prev.some((c) => c.id === cliente.id && (c.fecha ? c.fecha.substring(0,10) : '') === (new Date().toISOString().substring(0,10)))) return prev;
+      const nuevoCliente = {
+        id: cliente.id,
+        nombre: cliente.nombre,
+        direccion: cliente.direccion,
+        tipo: cliente.tipo,
+        status: 'pending',
+        fecha: new Date().toISOString(),
+      };
+      return [...prev, nuevoCliente];
     });
     setActiveTab('ruta'); // Cambia a la pestaña de ruta automáticamente
   };
@@ -338,14 +441,69 @@ export default function FormularioCompleto() {
   };
 
   // Métricas calculadas
-  const metrics = {
+  const [metrics, setMetrics] = useState({
     visitasHoy: 0,
     visitasSemana: 0,
-    visitasMes: puntosVisita.length,
-    clientesUnicos: puntosVisita.length,
-    promedioDiario: 0.3,
-    rutasCompletadas: miRuta.filter((r: any) => r.status === 'completada').length,
-  };
+    visitasMes: 0,
+    clientesUnicos: 0,
+    promedioDiario: 0,
+    rutasCompletadas: 0,
+  });
+
+  useEffect(() => {
+    // Calcular visitas usando Mi Ruta (si existe), si no, puntosVisita
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const todayKey = `${yyyy}-${mm}-${dd}`;
+
+    const getFecha = (item: { fecha?: string }) => item.fecha ? item.fecha.substring(0,10) : todayKey;
+    const getFechaObj = (item: { fecha?: string }) => item.fecha ? new Date(item.fecha) : today;
+    // Usar miRuta como fuente principal para métricas
+    const fuente = miRuta && miRuta.length > 0 ? miRuta : puntosVisita;
+
+    // Visitas hoy: si no hay fecha, se asume hoy
+    const visitasHoy = fuente.filter(p => getFecha(p) === todayKey).length;
+
+    // Visitas semana: si no hay fecha, se asume hoy
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    const visitasSemana = fuente.filter(p => {
+      const fechaP = getFechaObj(p);
+      return fechaP >= startOfWeek && fechaP <= today;
+    }).length;
+
+    // Visitas mes: si no hay fecha, se asume hoy
+    const visitasMes = fuente.filter(p => {
+      const fechaP = getFechaObj(p);
+      return fechaP.getMonth() === today.getMonth() && fechaP.getFullYear() === today.getFullYear();
+    }).length;
+
+    // Clientes únicos: usar los clientes de Mi Ruta si existen, si no, usar puntosVisita
+    let clientesUnicos = 0;
+    if (miRuta && miRuta.length > 0) {
+      clientesUnicos = new Set(miRuta.map(r => r.nombre || r.clientName)).size;
+    } else {
+      clientesUnicos = new Set(puntosVisita.map(p => p.clientName)).size;
+    }
+
+    // Promedio diario (simple)
+    const totalDias = puntosVisita.length > 0 ? Math.max(1, new Set(puntosVisita.map(p => p.fecha && p.fecha.substring(0,10))).size) : 1;
+    const promedioDiario = puntosVisita.length / totalDias;
+
+    // Rutas completadas: contar días en historialRutas con status 'completada'
+    const rutasCompletadas = historialRutas.filter((r: any) => r.status === 'completada').length;
+
+    setMetrics({
+      visitasHoy,
+      visitasSemana,
+      visitasMes,
+      clientesUnicos,
+      promedioDiario: Math.round(promedioDiario * 10) / 10,
+      rutasCompletadas,
+    });
+  }, [puntosVisita, miRuta, clientesFirebase, historialRutas]);
 
   // Get formatted date
   const getFormattedDate = () => {
@@ -362,73 +520,72 @@ export default function FormularioCompleto() {
   // ----- RENDER -----
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Dashboard Header */}
-      <View style={styles.header}>
+    <ScrollView style={[styles.container, darkMode && { backgroundColor: '#181a20' }]}> 
+      <View style={[styles.header, darkMode && { backgroundColor: '#23242a', borderColor: '#23242a' }]}> 
         <View style={styles.headerTop}>
           <View style={styles.userIconContainer}>
             <Text style={styles.userIcon}>👤</Text>
           </View>
           <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>¡Hola, {userName}!</Text>
-            <Text style={styles.headerDate}>{getFormattedDate()}</Text>
+            <Text style={[styles.headerTitle, darkMode && { color: '#fff' }]}>¡Hola, {userName}!</Text>
+            <Text style={[styles.headerDate, darkMode && { color: '#bbb' }]}>{getFormattedDate()}</Text>
           </View>
         </View>
         <View style={styles.headerBottom}>
-          <View style={styles.headerGroupInfo}>
+          <View style={[styles.headerGroupInfo, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
             <Text style={styles.headerTrophy}>🏆</Text>
-            <Text style={styles.headerGroupName}>{groupName}</Text>
+            <Text style={[styles.headerGroupName, darkMode && { color: '#fff', backgroundColor: '#23242a', borderColor: '#333' }]}>{groupName}</Text>
           </View>
-          <View style={styles.headerZoneInfo}>
+          <View style={[styles.headerZoneInfo, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
             <Text style={styles.headerLocationIcon}>📍</Text>
-            <Text style={styles.headerZoneName}>{zoneName}</Text>
+            <Text style={[styles.headerZoneName, darkMode && { color: '#fff', backgroundColor: '#23242a', borderColor: '#333' }]}>{zoneName}</Text>
           </View>
         </View>
       </View>
 
       {/* Metrics Section */}
-      <View style={styles.metricsCard}>
+      <View style={[styles.metricsCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
         <View style={styles.metricsHeader}>
-          <Text style={styles.metricsIcon}>📊</Text>
-          <Text style={styles.metricsTitle}>Mis Métricas</Text>
+          <Text style={[styles.metricsIcon, darkMode && { color: '#fff' }]}>📊</Text>
+          <Text style={[styles.metricsTitle, darkMode && { color: '#fff' }]}>Mis Métricas</Text>
         </View>
         <View style={styles.metricsGrid}>
-          <View style={[styles.metricBox, styles.metricBlue]}>
-            <Text style={styles.metricValue}>{metrics.visitasHoy}</Text>
-            <Text style={styles.metricLabel}>Visitas Hoy</Text>
+          <View style={[styles.metricBox, styles.metricBlue, darkMode && { backgroundColor: '#1976d2' }]}> 
+            <Text style={[styles.metricValue, darkMode && { color: '#fff' }]}>{metrics.visitasHoy}</Text>
+            <Text style={[styles.metricLabel, darkMode && { color: '#fff' }]}>Visitas Hoy</Text>
           </View>
-          <View style={[styles.metricBox, styles.metricPink]}>
-            <Text style={styles.metricValue}>{metrics.visitasSemana}</Text>
-            <Text style={styles.metricLabel}>Esta Semana</Text>
+          <View style={[styles.metricBox, styles.metricPink, darkMode && { backgroundColor: '#e5396a' }]}> 
+            <Text style={[styles.metricValue, darkMode && { color: '#fff' }]}>{metrics.visitasSemana}</Text>
+            <Text style={[styles.metricLabel, darkMode && { color: '#fff' }]}>Esta Semana</Text>
           </View>
-          <View style={[styles.metricBox, styles.metricGreen]}>
-            <Text style={styles.metricValue}>{metrics.visitasMes}</Text>
-            <Text style={styles.metricLabel}>Este Mes</Text>
+          <View style={[styles.metricBox, styles.metricGreen, darkMode && { backgroundColor: '#43a047' }]}> 
+            <Text style={[styles.metricValue, darkMode && { color: '#fff' }]}>{metrics.visitasMes}</Text>
+            <Text style={[styles.metricLabel, darkMode && { color: '#fff' }]}>Este Mes</Text>
           </View>
-          <View style={[styles.metricBox, styles.metricOrange]}>
-            <Text style={styles.metricValue}>{metrics.clientesUnicos}</Text>
-            <Text style={styles.metricLabel}>Clientes Únicos</Text>
+          <View style={[styles.metricBox, styles.metricOrange, darkMode && { backgroundColor: '#ff9800' }]}> 
+            <Text style={[styles.metricValue, darkMode && { color: '#fff' }]}>{metrics.clientesUnicos}</Text>
+            <Text style={[styles.metricLabel, darkMode && { color: '#fff' }]}>Clientes Únicos</Text>
           </View>
         </View>
-        <View style={styles.metricsPerformance}>
+        <View style={[styles.metricsPerformance, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }] }>
           <View style={styles.performanceHeader}>
-            <Text style={styles.performanceIcon}>📈</Text>
-            <Text style={styles.performanceTitle}>Rendimiento</Text>
+            <Text style={[styles.performanceIcon, darkMode && { color: '#fff' }]}>📈</Text>
+            <Text style={[styles.performanceTitle, darkMode && { color: '#fff' }]}>Rendimiento</Text>
           </View>
           <View style={styles.performanceRow}>
-            <Text style={styles.performanceLabel}>Promedio diario:</Text>
-            <Text style={styles.performanceValue}>{metrics.promedioDiario} visitas</Text>
+            <Text style={[styles.performanceLabel, darkMode && { color: '#bbb' }]}>Promedio diario:</Text>
+            <Text style={[styles.performanceValue, darkMode && { color: '#fff' }]}>{metrics.promedioDiario} visitas</Text>
           </View>
           <View style={styles.performanceRow}>
-            <Text style={styles.performanceLabel}>Rutas completadas:</Text>
-            <Text style={styles.performanceValue}>{metrics.rutasCompletadas}</Text>
+            <Text style={[styles.performanceLabel, darkMode && { color: '#bbb' }]}>Rutas completadas:</Text>
+            <Text style={[styles.performanceValue, darkMode && { color: '#fff' }]}>{metrics.rutasCompletadas}</Text>
           </View>
         </View>
       </View>
 
       {/* Tabs Section */}
-      <View style={styles.tabsCard}>
-        <View style={styles.tabBar}>
+      <View style={[styles.tabsCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
+        <View style={[styles.tabBar, darkMode && { backgroundColor: '#23242a' }]}> 
           {['ruta', 'clientes', 'historial'].map((tab) => (
             <TouchableOpacity
               key={tab}
@@ -445,7 +602,7 @@ export default function FormularioCompleto() {
           ))}
         </View>
 
-        <View style={styles.tabContent}>
+        <View style={[styles.tabContent, darkMode && { backgroundColor: '#23242a' }]}> 
           {/* TAB MI RUTA */}
           {activeTab === 'ruta' && (
             <View>
@@ -456,20 +613,104 @@ export default function FormularioCompleto() {
               </TouchableOpacity>
 
               {/* Estado de la Ruta */}
-              {miRuta.length > 0 ? (
-                <View style={styles.routeStatusCard}>
-                  <View style={styles.routeStatusHeader}>
-                    <Text style={styles.routeStatusTitle}>Estado de mi ruta:</Text>
-                    <View style={[styles.statusBadge, styles.statusInProgress]}>
-                      <Text style={styles.statusBadgeText}>En Progreso</Text>
+              {(() => {
+                // Mostrar estado solo si hay clientes para hoy
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                const todayKey = `${yyyy}-${mm}-${dd}`;
+                const clientesHoy = [
+                  ...miRuta.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey),
+                  ...puntosVisita.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey && !miRuta.some(m => m.id === p.id))
+                ];
+                if (clientesHoy.length > 0) {
+                  return (
+                    <View style={styles.routeStatusCard}>
+                      <View style={styles.routeStatusHeader}>
+                        <Text style={styles.routeStatusTitle}>Estado de mi ruta:</Text>
+                        <View style={[styles.statusBadge, styles.statusInProgress]}>
+                          <Text style={styles.statusBadgeText}>En Progreso</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.routeStatusSubtitle}>Ruta de {userName}</Text>
+                      <Button
+                        title="🏁 Finalizar mi ruta"
+                        onPress={async () => {
+                          // Obtener la fecha de hoy en formato YYYY-MM-DD
+                          const today = new Date();
+                          const yyyy = today.getFullYear();
+                          const mm = String(today.getMonth() + 1).padStart(2, '0');
+                          const dd = String(today.getDate()).padStart(2, '0');
+                          const todayKey = `${yyyy}-${mm}-${dd}`;
+
+                          // Actualizar historialRutas: marcar como completada
+                          setHistorialRutas((prev) => {
+                            const idx = prev.findIndex(r => r.id === todayKey);
+                            if (idx >= 0) {
+                              const updated = [...prev];
+                              updated[idx] = { ...updated[idx], status: 'completada' };
+                              return updated;
+                            } else {
+                              // Si no existe, crear registro
+                              return [
+                                ...prev,
+                                {
+                                  id: todayKey,
+                                  nombre: todayKey,
+                                  fecha: todayKey,
+                                  visitas: 0,
+                                  puntos: [],
+                                  status: 'completada',
+                                },
+                              ];
+                            }
+                          });
+
+                          // Limpiar miRuta y puntosVisita solo para hoy
+                          setMiRuta((prev) => prev.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) !== todayKey));
+                          setPuntosVisita((prev) => prev.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) !== todayKey));
+
+                          // Opcional: limpiar cliente seleccionado
+                          setClienteSeleccionado(null);
+
+
+                          // Guardar en Firestore con los puntos y visitas reales del día
+                          try {
+                            // Obtener los puntos y visitas del día antes de limpiar
+                            const todosClientes = [
+                              ...miRuta.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey),
+                              ...puntosVisita.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey && !miRuta.some(m => m.id === p.id))
+                            ];
+                            const completadas = todosClientes.filter(p => p.status === 'completed' || p.status === 'completada');
+                            await setDoc(doc(db, 'historialRutas', todayKey), {
+                              id: todayKey,
+                              nombre: todayKey,
+                              fecha: todayKey,
+                              visitas: completadas.length,
+                              puntos: todosClientes,
+                              status: 'completada',
+                            });
+                          } catch (e) {
+                            console.error('Error guardando historial en Firestore', e);
+                          }
+
+                          // Forzar recarga visual del historial para el calendario
+                          if (typeof cargarHistorialRutas === 'function') {
+                            setTimeout(() => {
+                              cargarHistorialRutas();
+                            }, 200);
+                          }
+                        }}
+                      />
                     </View>
-                  </View>
-                  <Text style={styles.routeStatusSubtitle}>Ruta de {userName}</Text>
-                  <Button title="🏁 Finalizar mi ruta" onPress={() => {}} />
-                </View>
-              ) : (
-                <Text style={{textAlign:'center',marginVertical:24,fontSize:16,color:'#888'}}>No hay rutas asignada para hoy.</Text>
-              )}
+                  );
+                } else {
+                  return (
+                    <Text style={{textAlign:'center',marginVertical:24,fontSize:16,color:'#888'}}>No hay rutas asignada para hoy.</Text>
+                  );
+                }
+              })()}
 
               {/* Puntos de Visita */}
               <View style={styles.visitPointsSection}>
@@ -478,7 +719,7 @@ export default function FormularioCompleto() {
                   <Text style={styles.visitPointsTitle}>{puntosVisita.length} clientes</Text>
                 </View>
                 {puntosVisita.length === 0 ? (
-                  <Text style={styles.emptyText}>No hay puntos de visita asignados.</Text>
+                  <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No hay puntos de visita asignados.</Text>
                 ) : (
                   puntosVisita.map((punto: any) => (
                     <View key={punto.id} style={styles.visitCard}>
@@ -512,19 +753,41 @@ export default function FormularioCompleto() {
                           {/* Botón para marcar como completada */}
                           <TouchableOpacity
                             style={styles.visitCardActionReady}
-                            onPress={() => {
-                              setPuntosVisita((prev) => prev.map((pv) =>
-                                pv.id === punto.id ? { ...pv, status: 'completed' } : pv
-                              ));
+                            onPress={async () => {
+                              setPuntosVisita((prev) => {
+                                const nuevos = prev.map((pv) =>
+                                  pv.id === punto.id ? { ...pv, status: 'completed' } : pv
+                                );
+                                return nuevos;
+                              });
+
+                              // Verificar si todos los clientes del día están completados y sincronizar historial solo en ese caso
+                              const today = new Date();
+                              const yyyy = today.getFullYear();
+                              const mm = String(today.getMonth() + 1).padStart(2, '0');
+                              const dd = String(today.getDate()).padStart(2, '0');
+                              const todayKey = `${yyyy}-${mm}-${dd}`;
+                              const todosHoy = puntosVisita
+                                .map((pv, idx) => idx === puntosVisita.findIndex(p => p.id === punto.id) ? { ...pv, status: 'completed' } : pv)
+                                .filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey);
+                              const completadosHoy = todosHoy.filter(p => p.status === 'completed' || p.status === 'completada');
+                              if (todosHoy.length > 0 && completadosHoy.length === todosHoy.length) {
+                                setTimeout(() => {
+                                  syncAndSaveHistorial();
+                                }, 100);
+                              }
                             }}
                           >
                             <Text style={styles.visitCardActionIcon}>✔️</Text>
                           </TouchableOpacity>
+
                           {/* Botón para cancelar/eliminar */}
                           <TouchableOpacity
                             style={styles.visitCardActionCancel}
+
                             onPress={() => {
                               setPuntosVisita((prev) => prev.filter((pv) => pv.id !== punto.id));
+
                             }}
                           >
                             <Text style={styles.visitCardActionIcon}>⛔</Text>
@@ -544,29 +807,30 @@ export default function FormularioCompleto() {
                 <Text style={styles.visitPointsTitle}>{clientesFirebase.length} clientes disponibles</Text>
                 {errores.length > 0 && (
                   <View style={{ backgroundColor: '#fee', padding: 8, borderRadius: 8, marginBottom: 8 }}>
+
                     {errores.map((err, idx) => (
                       <Text key={idx} style={{ color: 'red', fontSize: 13 }}>{err}</Text>
                     ))}
                   </View>
                 )}
                 {clientesFirebase.length === 0 ? (
-                  <Text style={styles.emptyText}>No hay clientes disponibles.</Text>
+                  <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No hay clientes disponibles.</Text>
                 ) : (
                   clientesFirebase.map((cliente: any) => (
-                    <View key={cliente.id} style={styles.visitCard}>
+                    <View key={cliente.id} style={[styles.visitCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }] }>
                       <View style={styles.visitCardLeft}>
-                        <View style={styles.visitCardIconBox}>
-                          <Text style={styles.visitCardIcon}>🧑‍💼</Text>
+                        <View style={[styles.visitCardIconBox, darkMode && { backgroundColor: '#23242a' }] }>
+                          <Text style={[styles.visitCardIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.visitCardTitle}>{cliente.nombre || ''}</Text>
+                          <Text style={[styles.visitCardTitle, darkMode && { color: '#fff' }]}>{cliente.nombre || ''}</Text>
                           <View style={styles.visitCardRow}>
                             <Text style={styles.visitCardSubIcon}>📍</Text>
-                            <Text style={styles.visitCardSubtitle}>{cliente.direccion || ''}</Text>
+                            <Text style={[styles.visitCardSubtitle, darkMode && { color: '#bbb' }]}>{cliente.direccion || ''}</Text>
                           </View>
                           {cliente.tipo ? (
                             <View style={styles.visitCardRow}>
-                              <Text style={styles.visitCardTipo}>{cliente.tipo}</Text>
+                              <Text style={[styles.visitCardTipo, darkMode && { color: '#bbb', backgroundColor: '#23242a' }]}>{cliente.tipo}</Text>
                             </View>
                           ) : null}
                         </View>
@@ -600,24 +864,42 @@ export default function FormularioCompleto() {
                   <Text key={d} style={styles.calendarHeaderCell}>{d}</Text>
                 ))}
               </View>
-              {/* Simulación de días del mes, puedes reemplazar por datos reales */}
+              {/* Calendario real vinculado a historialRutas */}
               <View style={styles.calendarGrid}>
-                {/* Renderizar 5 filas de 7 días (ejemplo) */}
                 {[0,1,2,3,4].map((week) => (
                   <View key={week} style={styles.calendarRow}>
                     {[0,1,2,3,4,5,6].map((day) => {
                       const dayNum = week*7+day+1;
-                      // Simulación de estados
-                      let cellStyle = styles.calendarCell;
+                      if (dayNum > 31) return <View key={day} style={styles.calendarCell} />;
+                      // Fecha en formato YYYY-MM-DD
+                      const today = new Date();
+                      const yyyy = today.getFullYear();
+                      const mm = String(today.getMonth() + 1).padStart(2, '0');
+                      const dd = String(dayNum).padStart(2, '0');
+                      const dateKey = `${yyyy}-${mm}-${dd}`;
+
+                      // Buscar el registro de ese día en historialRutas
+                      const registroDia = historialRutas.find(r => r.fecha && r.fecha.substring(0,10) === dateKey);
+                      let cellStyle = { ...styles.calendarCell };
                       let textStyle = styles.calendarCellText;
                       let icons = null;
-                      if ([17,26,27,2,4].includes(dayNum)) { cellStyle = [styles.calendarCell, styles.calendarCellDone]; icons = <Text>🧾 1</Text>; }
-                      if ([30,1,11].includes(dayNum)) { cellStyle = [styles.calendarCell, styles.calendarCellProgress]; textStyle = styles.calendarCellTextProgress; }
-                      if (dayNum === 12) { cellStyle = [styles.calendarCell, styles.calendarCellToday]; }
+                      if (registroDia) {
+                        if (registroDia.status && registroDia.status.trim().toLowerCase() === 'completada') {
+                          cellStyle = { ...cellStyle, ...styles.calendarCellDone };
+                          icons = <Text>🧾 {(registroDia.puntos ? registroDia.puntos.length : '')}</Text>;
+                        } else if (registroDia.status && registroDia.status.trim().toLowerCase() === 'en-progreso') {
+                          cellStyle = { ...cellStyle, ...styles.calendarCellProgress };
+                          textStyle = styles.calendarCellTextProgress;
+                        }
+                      }
+                      // Día actual: sumar borde azul
+                      if (parseInt(dd) === today.getDate()) {
+                        cellStyle = { ...cellStyle, ...styles.calendarCellToday };
+                      }
                       return (
                         <View key={day} style={cellStyle}>
-                          <Text style={textStyle}>{dayNum <= 31 ? dayNum : ''}</Text>
-                          {icons && dayNum <= 31 ? <View>{icons}</View> : null}
+                          <Text style={textStyle}>{dayNum}</Text>
+                          {icons ? <View>{icons}</View> : null}
                         </View>
                       );
                     })}
@@ -625,20 +907,20 @@ export default function FormularioCompleto() {
                 ))}
               </View>
               {/* Leyenda */}
-              <View style={styles.calendarLegendBox}>
-                <Text style={styles.calendarLegendTitle}>Leyenda del Calendario:</Text>
+              <View style={[styles.calendarLegendBox, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
+                <Text style={[styles.calendarLegendTitle, darkMode && { color: '#fff' }]}>Leyenda del Calendario:</Text>
                 <View style={styles.calendarLegendRow}>
                   <View style={styles.calendarLegendCol}>
-                    <Text style={styles.calendarLegendSubtitle}>Estados:</Text>
-                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#d1f7d6'}]} /> <Text>Con actividad completada</Text></View>
-                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#fff3cd'}]} /> <Text>Rutas en progreso</Text></View>
-                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#f5f6fa', borderWidth:1, borderColor:'#e0e0e0'}]} /> <Text>Sin actividad</Text></View>
+                    <Text style={[styles.calendarLegendSubtitle, darkMode && { color: '#fff' }]}>Estados:</Text>
+                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#d1f7d6', borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Con actividad completada</Text></View>
+                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#fff3cd', borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Rutas en progreso</Text></View>
+                    <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor: darkMode ? '#23242a' : '#f5f6fa', borderWidth:1, borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Sin actividad</Text></View>
                   </View>
                   <View style={styles.calendarLegendCol}>
-                    <Text style={styles.calendarLegendSubtitle}>Símbolos:</Text>
-                    <View style={styles.calendarLegendItem}><Text>🗺️</Text> <Text>Rutas completadas</Text></View>
-                    <View style={styles.calendarLegendItem}><Text>🧾</Text> <Text>Visitas realizadas</Text></View>
-                    <View style={styles.calendarLegendItem}><Text style={{color:'#1976d2'}}>●</Text> <Text>Día actual</Text></View>
+                    <Text style={[styles.calendarLegendSubtitle, darkMode && { color: '#fff' }]}>Símbolos:</Text>
+                    <View style={styles.calendarLegendItem}><Text>🗺️</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Rutas completadas</Text></View>
+                    <View style={styles.calendarLegendItem}><Text>🧾</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Visitas realizadas</Text></View>
+                    <View style={styles.calendarLegendItem}><Text style={{color:'#1976d2'}}>●</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Día actual</Text></View>
                   </View>
                 </View>
               </View>
@@ -657,31 +939,29 @@ export default function FormularioCompleto() {
         <View style={styles.modalOverlay}>
           <View style={styles.prospectoModalCard}>
             <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={styles.prospectoIconCircle}>
-                <Text style={styles.prospectoIcon}>🧑‍💼</Text>
+              <View style={[styles.prospectoIconCircle, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}>
+                <Text style={[styles.prospectoIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
               </View>
-              <Text style={styles.prospectoModalTitle}>Registrar Cliente Prospecto</Text>
+              <Text style={[styles.prospectoModalTitle, darkMode && { color: '#fff' }]}>Registrar Cliente Prospecto</Text>
             </View>
-            <Text style={styles.prospectoModalSubtitle}>¿Encontraste un nuevo punto de venta?</Text>
-            <Text style={styles.prospectoModalText}>
-              Registra clientes potenciales que encuentres durante tu ruta para futuras visitas
-            </Text>
-            <TouchableOpacity style={styles.prospectoModalButton} onPress={() => { setShowProspectoForm(true); setShowProspectoModal(false); }}>
-              <Text style={styles.prospectoModalButtonText}>Registrar Nuevo Prospecto</Text>
+            <Text style={[styles.prospectoModalSubtitle, darkMode && { color: '#bbb' }]}>¿Encontraste un nuevo punto de venta?</Text>
+            <Text style={[styles.prospectoModalText, darkMode && { color: '#bbb' }]}>Registra clientes potenciales que encuentres durante tu ruta para futuras visitas</Text>
+            <TouchableOpacity style={[styles.prospectoModalButton, darkMode && { backgroundColor: '#333' }]} onPress={() => { setShowProspectoForm(true); setShowProspectoModal(false); }}>
+              <Text style={[styles.prospectoModalButtonText, darkMode && { color: '#fff' }]}>Registrar Nuevo Prospecto</Text>
             </TouchableOpacity>
-            <View style={styles.prospectoInfoBox}>
-              <Text style={styles.prospectoInfoTitle}>¿Qué información necesitas capturar?</Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#e63946'}}>🏪 Nombre del negocio *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#e63946'}}>📍 Dirección exacta *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#e63946'}}>🏷️ Tipo de negocio *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#6c757d'}}>📞 Teléfono (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#6c757d'}}>📷 Foto del establecimiento (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#6c757d'}}>💬 Comentarios adicionales (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color:'#6c757d'}}>📡 Ubicación GPS automática</Text></Text>
-              <Text style={styles.prospectoInfoNote}>* Campos obligatorios</Text>
+            <View style={[styles.prospectoInfoBox, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}>
+              <Text style={[styles.prospectoInfoTitle, darkMode && { color: '#fff' }]}>¿Qué información necesitas capturar?</Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏪 Nombre del negocio *</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>📍 Dirección exacta *</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏷️ Tipo de negocio *</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📞 Teléfono (opcional)</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📷 Foto del establecimiento (opcional)</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>💬 Comentarios adicionales (opcional)</Text></Text>
+              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📡 Ubicación GPS automática</Text></Text>
+              <Text style={[styles.prospectoInfoNote, darkMode && { color: '#bbb' }]}>* Campos obligatorios</Text>
             </View>
-            <TouchableOpacity style={styles.prospectoModalClose} onPress={() => setShowProspectoModal(false)}>
-              <Text style={styles.prospectoModalCloseText}>Cerrar</Text>
+            <TouchableOpacity style={[styles.prospectoModalClose, darkMode && { backgroundColor: '#333' }]} onPress={() => setShowProspectoModal(false)}>
+              <Text style={[styles.prospectoModalCloseText, darkMode && { color: '#fff' }]}>Cerrar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -776,6 +1056,7 @@ export default function FormularioCompleto() {
   );
 }
 
+// Remove duplicate keys in StyleSheet below this line
 const styles = StyleSheet.create({
   // Container principal
   container: {
@@ -1336,47 +1617,9 @@ const styles = StyleSheet.create({
   },
 
   // Tabs
-  tabsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#007AFF',
-  },
-  tabIcon: {
-    fontSize: 22,
-    marginBottom: 4,
-  },
-  tabText: {
-    fontSize: 14,
-    color: '#6c757d',
-  },
-  tabTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  tabContent: {
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-  },
+  // Tabs (no duplicates)
+
+  // (Removed duplicate tab styles. Only the first occurrence is kept above.)
 
   // Modal styles
   modalOverlay: {

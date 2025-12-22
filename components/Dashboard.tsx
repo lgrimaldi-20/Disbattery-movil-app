@@ -1,16 +1,43 @@
-import React from 'react';
-import { View, Text, StyleSheet, Button } from 'react-native';
+
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Button, TouchableOpacity } from 'react-native';
 import FormularioCompleto from './FormularioCompleto';
 
 export default function Dashboard({ user, onLogout }: { user: string; onLogout: () => void }) {
+  const [darkMode, setDarkMode] = useState(false);
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Disbattery</Text>
-      <Text style={styles.title}>Bienvenido, {user}</Text>
-      <View style={styles.logoutWrapper}>
-        <Button title="Cerrar sesión" onPress={onLogout} color="#FF3B30" />
+    <View style={[styles.container, darkMode && { backgroundColor: '#181a20' }]}> 
+      {/* Botón global dark mode */}
+      <View style={{ alignItems: 'flex-end', marginBottom: 8 }}>
+        <TouchableOpacity
+          onPress={() => setDarkMode((prev) => !prev)}
+          style={{
+            backgroundColor: darkMode ? '#222' : '#eee',
+            borderRadius: 20,
+            paddingVertical: 6,
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: darkMode ? '#444' : '#ccc',
+          }}
+        >
+          <Text style={{ color: darkMode ? '#fff' : '#222', fontWeight: 'bold', marginRight: 6 }}>
+            {darkMode ? 'Modo Claro' : 'Modo Oscuro'}
+          </Text>
+          <Text style={{ fontSize: 18 }}>{darkMode ? '🌙' : '☀️'}</Text>
+        </TouchableOpacity>
       </View>
-      <FormularioCompleto />
+      <Text style={[styles.header, darkMode && { color: '#2196f3' }]}>Disbattery</Text>
+      <Text style={[styles.title, darkMode && { color: '#fff' }]}>Bienvenido, {user}</Text>
+      <View style={styles.logoutWrapper}>
+        <TouchableOpacity
+          onPress={onLogout}
+          style={{ backgroundColor: '#f44336', borderRadius: 6, paddingHorizontal: 18, paddingVertical: 8 }}>
+          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>CERRAR SESIÓN</Text>
+        </TouchableOpacity>
+      </View>
+      <FormularioCompleto darkMode={darkMode} />
     </View>
   );
 }
