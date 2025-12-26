@@ -715,8 +715,8 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
               {/* Puntos de Visita */}
               <View style={styles.visitPointsSection}>
                 <View style={styles.visitPointsHeader}>
-                  <Text style={styles.visitPointsIcon}>👥</Text>
-                  <Text style={styles.visitPointsTitle}>{puntosVisita.length} clientes</Text>
+                  <Text style={[styles.visitPointsIcon, darkMode && { color: '#bbb' }]}>👥</Text>
+                  <Text style={[styles.visitPointsTitle, darkMode && { color: '#fff' }]}>{puntosVisita.length} clientes</Text>
                 </View>
                 {puntosVisita.length === 0 ? (
                   <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No hay puntos de visita asignados.</Text>
@@ -1067,7 +1067,7 @@ const styles = StyleSheet.create({
   // Dashboard Header
   header: {
     backgroundColor: '#fff',
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
     paddingTop: 60,
     paddingBottom: 24,
     borderBottomWidth: 1,
@@ -1145,7 +1145,7 @@ const styles = StyleSheet.create({
   // Metrics Card
   metricsCard: {
     backgroundColor: '#fff',
-    padding: 24,
+    padding: 12,
     marginBottom: 2,
   },
   metricsHeader: {
@@ -1380,7 +1380,7 @@ const styles = StyleSheet.create({
   },
   visitCardLeft: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     flex: 1,
     gap: 12,
   },
@@ -1401,6 +1401,9 @@ const styles = StyleSheet.create({
     fontSize: 19,
     color: '#222',
     marginBottom: 2,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    textAlign: 'left',
   },
   visitCardRow: {
     flexDirection: 'row',

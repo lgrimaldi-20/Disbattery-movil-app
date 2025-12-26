@@ -25,7 +25,7 @@ export default function Dashboard({ user, onLogout }: { user: string; onLogout: 
           <Text style={{ color: darkMode ? '#fff' : '#222', fontWeight: 'bold', marginRight: 6 }}>
             {darkMode ? 'Modo Claro' : 'Modo Oscuro'}
           </Text>
-          <Text style={{ fontSize: 18 }}>{darkMode ? '🌙' : '☀️'}</Text>
+          <Text style={{ fontSize: 18 }}>{darkMode ? '☀️' : '🌙'}</Text>
         </TouchableOpacity>
       </View>
       <Text style={[styles.header, darkMode && { color: '#2196f3' }]}>Disbattery</Text>
