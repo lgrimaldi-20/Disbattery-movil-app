@@ -126,7 +126,7 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
     ];
     const completadas = todosClientes.filter(p => p.status === 'completed' || p.status === 'completada');
     const totalHoy = todosClientes.length;
-    const diaCompletado = totalHoy > 0 && completadas.length === totalHoy;
+    const diaCompletada = totalHoy > 0 && completadas.length === totalHoy;
 
     // Actualizar historial y estado visual inmediato
     let nuevoHistorial = historialRutas ? [...historialRutas] : [];
@@ -134,11 +134,19 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
     let statusHoy = 'pendiente';
     if (totalHoy > 0) {
       if (completadas.length === totalHoy) {
-        statusHoy = 'completada';
+        statusHoy = 'completada'; // SIEMPRE femenino, minúsculas, sin acento
       } else if (completadas.length > 0) {
         statusHoy = 'en-progreso';
       } else {
-        statusHoy = 'en-progreso'; // Si hay clientes pero ninguno completado, igual es "en progreso"
+        statusHoy = 'en-progreso';
+      }
+      // Forzar status a minúsculas, sin acento y SIEMPRE 'completada' si está completo
+      if (completadas.length === totalHoy) {
+        statusHoy = 'completada';
+      } else if (statusHoy.normalize) {
+        statusHoy = statusHoy.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      } else {
+        statusHoy = statusHoy.toLowerCase();
       }
       const nuevoRegistro = {
         id: todayKey,
@@ -175,7 +183,10 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
 
   useEffect(() => {
     syncAndSaveHistorial();
-  }, [miRuta, puntosVisita]);
+    if (activeTab === 'historial') {
+      cargarHistorialRutas();
+    }
+  }, [miRuta, puntosVisita, activeTab]);
 
   const [nuevoProspecto, setNuevoProspecto] = useState({
     nombre: '',
@@ -644,28 +655,9 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                           const dd = String(today.getDate()).padStart(2, '0');
                           const todayKey = `${yyyy}-${mm}-${dd}`;
 
-                          // Actualizar historialRutas: marcar como completada
-                          setHistorialRutas((prev) => {
-                            const idx = prev.findIndex(r => r.id === todayKey);
-                            if (idx >= 0) {
-                              const updated = [...prev];
-                              updated[idx] = { ...updated[idx], status: 'completada' };
-                              return updated;
-                            } else {
-                              // Si no existe, crear registro
-                              return [
-                                ...prev,
-                                {
-                                  id: todayKey,
-                                  nombre: todayKey,
-                                  fecha: todayKey,
-                                  visitas: 0,
-                                  puntos: [],
-                                  status: 'completada',
-                                },
-                              ];
-                            }
-                          });
+
+                          // Guardar historial ANTES de limpiar los arrays
+                          await syncAndSaveHistorial();
 
                           // Limpiar miRuta y puntosVisita solo para hoy
                           setMiRuta((prev) => prev.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) !== todayKey));
@@ -673,34 +665,6 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
 
                           // Opcional: limpiar cliente seleccionado
                           setClienteSeleccionado(null);
-
-
-                          // Guardar en Firestore con los puntos y visitas reales del día
-                          try {
-                            // Obtener los puntos y visitas del día antes de limpiar
-                            const todosClientes = [
-                              ...miRuta.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey),
-                              ...puntosVisita.filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey && !miRuta.some(m => m.id === p.id))
-                            ];
-                            const completadas = todosClientes.filter(p => p.status === 'completed' || p.status === 'completada');
-                            await setDoc(doc(db, 'historialRutas', todayKey), {
-                              id: todayKey,
-                              nombre: todayKey,
-                              fecha: todayKey,
-                              visitas: completadas.length,
-                              puntos: todosClientes,
-                              status: 'completada',
-                            });
-                          } catch (e) {
-                            console.error('Error guardando historial en Firestore', e);
-                          }
-
-                          // Forzar recarga visual del historial para el calendario
-                          if (typeof cargarHistorialRutas === 'function') {
-                            setTimeout(() => {
-                              cargarHistorialRutas();
-                            }, 200);
-                          }
                         }}
                       />
                     </View>
@@ -723,36 +687,39 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                 ) : (
                   puntosVisita.map((punto: any) => (
                     <View key={punto.id} style={styles.visitCard}>
-                      <View style={styles.visitCardLeft}>
-                        <View style={styles.visitCardIconBox}>
-                          <Text style={styles.visitCardIcon}>🧑‍💼</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.visitCardTitle}>{punto.nombre}</Text>
-                          <View style={styles.visitCardRow}>
-                            <Text style={styles.visitCardSubIcon}>📍</Text>
-                            <Text style={styles.visitCardSubtitle}>{punto.direccion}</Text>
+                      <View key={punto.id} style={[styles.visitCard, {flexDirection: 'column', maxWidth: 600, width: '100%'}]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start', width: '100%' }}>
+                          <View style={styles.visitCardLeft}>
+                            <View style={styles.visitCardIconBox}>
+                              <Text style={styles.visitCardIcon}>🧑‍💼</Text>
+                            </View>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[styles.visitCardTitle, {maxWidth: '100%', flexWrap: 'wrap', wordBreak: 'break-word'}]}>{punto.nombre}</Text>
+                              <View style={styles.visitCardRow}>
+                                <Text style={styles.visitCardSubIcon}>📍</Text>
+                                <Text style={[styles.visitCardSubtitle, {maxWidth: '100%', flexWrap: 'wrap', wordBreak: 'break-word'}]}>{punto.direccion}</Text>
+                              </View>
+                              <View style={styles.visitCardRow}>
+                                <Text style={styles.visitCardTipo}>{punto.tipo}</Text>
+                              </View>
+                            </View>
                           </View>
-                          <View style={styles.visitCardRow}>
-                            <Text style={styles.visitCardTipo}>{punto.tipo}</Text>
+                          <View style={{ alignItems: 'flex-end', minWidth: 120 }}>
+                            <View style={styles.visitCardInfoBox}>
+                              <View style={styles.visitCardTimeBox}>
+                                <Text style={styles.visitCardTimeIcon}>⏰</Text>
+                                <Text style={styles.visitCardTimeText}>30 min</Text>
+                              </View>
+                              <Text style={styles.visitCardStatus}>
+                                {punto.status === 'completed' ? 'Completada' : 'Pendiente'}
+                              </Text>
+                              <Text style={styles.visitCardArrow}>→</Text>
+                            </View>
                           </View>
                         </View>
-                      </View>
-                      <View style={styles.visitCardRight}>
-                        <View style={styles.visitCardInfoBox}>
-                          <View style={styles.visitCardTimeBox}>
-                            <Text style={styles.visitCardTimeIcon}>⏰</Text>
-                            <Text style={styles.visitCardTimeText}>30 min</Text>
-                          </View>
-                          <Text style={styles.visitCardStatus}>
-                            {punto.status === 'completed' ? 'Completado' : 'Pendiente'}
-                          </Text>
-                          <Text style={styles.visitCardArrow}>→</Text>
-                        </View>
-                        <View style={styles.visitCardActions}>
-                          {/* Botón para marcar como completada */}
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, alignSelf: 'flex-end', flexWrap: 'wrap' }}>
                           <TouchableOpacity
-                            style={styles.visitCardActionReady}
+                            style={[styles.visitCardActionReady, {backgroundColor: '#e6f0ff', borderColor: '#b8d4ff', borderWidth: 1}]}
                             onPress={async () => {
                               setPuntosVisita((prev) => {
                                 const nuevos = prev.map((pv) =>
@@ -760,37 +727,24 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                                 );
                                 return nuevos;
                               });
-
-                              // Verificar si todos los clientes del día están completados y sincronizar historial solo en ese caso
-                              const today = new Date();
-                              const yyyy = today.getFullYear();
-                              const mm = String(today.getMonth() + 1).padStart(2, '0');
-                              const dd = String(today.getDate()).padStart(2, '0');
-                              const todayKey = `${yyyy}-${mm}-${dd}`;
-                              const todosHoy = puntosVisita
-                                .map((pv, idx) => idx === puntosVisita.findIndex(p => p.id === punto.id) ? { ...pv, status: 'completed' } : pv)
-                                .filter(p => (p.fecha ? p.fecha.substring(0,10) : todayKey) === todayKey);
-                              const completadosHoy = todosHoy.filter(p => p.status === 'completed' || p.status === 'completada');
-                              if (todosHoy.length > 0 && completadosHoy.length === todosHoy.length) {
-                                setTimeout(() => {
-                                  syncAndSaveHistorial();
-                                }, 100);
-                              }
+                              setTimeout(() => {
+                                syncAndSaveHistorial();
+                              }, 100);
                             }}
                           >
                             <Text style={styles.visitCardActionIcon}>✔️</Text>
                           </TouchableOpacity>
-
-                          {/* Botón para cancelar/eliminar */}
                           <TouchableOpacity
-                            style={styles.visitCardActionCancel}
-
+                            style={[styles.visitCardActionCancel, {backgroundColor: '#fff0f0', borderColor: '#ffb8b8', borderWidth: 1}]}
                             onPress={() => {
                               setPuntosVisita((prev) => prev.filter((pv) => pv.id !== punto.id));
-
                             }}
                           >
                             <Text style={styles.visitCardActionIcon}>⛔</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={[styles.smallFotoBtn, {backgroundColor: '#f5f6fa', borderColor: '#e0e0e0', borderWidth: 1}]} onPress={pickImageFromGallery}>
+                            <Text style={styles.smallFotoIcon}>📷</Text>
+                            <Text style={styles.smallFotoText}>Foto</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -839,7 +793,11 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                         <TouchableOpacity style={styles.visitCardActionReady} onPress={() => seleccionarCliente(cliente)}>
                           <Text style={styles.visitCardActionIcon}>✔️</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity style={styles.visitCardActionCancel} onPress={() => setPuntosVisita((prev) => prev.filter((pv) => pv.id !== cliente.id))}>
+                          <Text style={styles.visitCardActionIcon}>⛔</Text>
+                        </TouchableOpacity>
                       </View>
+                      {/* Eliminar botón de foto en Selecciona Cliente */}
                     </View>
                   ))
                 )}
@@ -850,6 +808,10 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                     <Text>{`Dirección: ${clienteSeleccionado.direccion || ''}`}</Text>
                     <Text>{`RIF: ${clienteSeleccionado.rif || ''}`}</Text>
                     <Text>{`Tipo: ${clienteSeleccionado.tipo || ''}`}</Text>
+                    <TouchableOpacity style={styles.smallFotoBtn} onPress={pickImageFromGallery}>
+                      <Text style={styles.smallFotoIcon}>📷</Text>
+                      <Text style={styles.smallFotoText}>Foto</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
@@ -1056,12 +1018,32 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
   );
 }
 
-// Remove duplicate keys in StyleSheet below this line
 const styles = StyleSheet.create({
+// ...existing code...
+  smallFotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f6fa',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  smallFotoIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  smallFotoText: {
+    fontSize: 14,
+    color: '#222',
+    fontWeight: '500',
+  },
   // Container principal
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
   },
 
   // Dashboard Header
