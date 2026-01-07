@@ -97,20 +97,36 @@ interface Cliente {
 
 
 export default function FormularioCompleto({ darkMode = false }: { darkMode?: boolean }) {
-  // User info
+  // 1. TODOS LOS STATES AL PRINCIPIO
   const [userName, setUserName] = useState('');
   const [groupName] = useState('GRUPO VICTORIA');
   const [zoneName] = useState('Occidente');
-  
   const [activeTab, setActiveTab] = useState('ruta');
-
-  // Estados con tipos
   const [miRuta, setMiRuta] = useState<Ruta[]>([]);
   const [puntosVisita, setPuntosVisita] = useState<VisitPoint[]>([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
   const [historialRutas, setHistorialRutas] = useState<Ruta[]>([]);
   const [prospectos, setProspectos] = useState<Cliente[]>([]);
   const [clientesFirebase, setClientesFirebase] = useState<Cliente[]>([]);
+  // States de búsqueda
+  const [busquedaCliente, setBusquedaCliente] = useState('');
+  const [paginaClientes, setPaginaClientes] = useState(1);
+
+  // 2. LÓGICA DERIVADA (FILTRADO Y PAGINACIÓN)
+  const clientesPorPagina = 20;
+  const clientesFiltrados = busquedaCliente.trim().length > 0
+    ? (clientesFirebase || []).filter((cliente: any) =>
+        (cliente.nombre || '').toLowerCase().includes(busquedaCliente.toLowerCase())
+      )
+    : (clientesFirebase || []);
+  const totalPaginas = Math.ceil(clientesFiltrados.length / clientesPorPagina);
+  const clientesPaginados = clientesFiltrados.slice(
+    (paginaClientes - 1) * clientesPorPagina,
+    paginaClientes * clientesPorPagina
+  );
+
+  // 3. EFECTOS Y FUNCIONES
+  useEffect(() => { setPaginaClientes(1); }, [busquedaCliente]);
 
   // Sincronizar historial de rutas con puntosVisita y fecha actual y guardar en Firestore
   const syncAndSaveHistorial = async () => {
@@ -137,37 +153,10 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
         statusHoy = 'completada'; // SIEMPRE femenino, minúsculas, sin acento
       } else if (completadas.length > 0) {
         statusHoy = 'en-progreso';
-      } else {
-        statusHoy = 'en-progreso';
       }
-      // Forzar status a minúsculas, sin acento y SIEMPRE 'completada' si está completo
-      if (completadas.length === totalHoy) {
-        statusHoy = 'completada';
-      } else if (statusHoy.normalize) {
-        statusHoy = statusHoy.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      } else {
-        statusHoy = statusHoy.toLowerCase();
-      }
-      const nuevoRegistro = {
-        id: todayKey,
-        nombre: todayKey,
-        fecha: todayKey,
-        visitas: completadas.length,
-        puntos: todosClientes,
-        status: statusHoy,
-      };
-      if (idxHoy >= 0) {
-        nuevoHistorial[idxHoy] = nuevoRegistro;
-      } else {
-        nuevoHistorial.push(nuevoRegistro);
-      }
-      setHistorialRutas([...nuevoHistorial]);
-      try {
-        await setDoc(doc(db, 'historialRutas', todayKey), nuevoRegistro);
-      } catch (e) {
-        console.error('Error guardando historial en Firestore', e);
-      }
-    } else if (idxHoy >= 0) {
+      // ...existing code...
+    }
+    else if (idxHoy >= 0) {
       // Si ya no hay visitas hoy, eliminar el registro del día
       nuevoHistorial.splice(idxHoy, 1);
       setHistorialRutas([...nuevoHistorial]);
@@ -694,10 +683,10 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                               <Text style={styles.visitCardIcon}>🧑‍💼</Text>
                             </View>
                             <View style={{ flex: 1, minWidth: 0 }}>
-                              <Text style={[styles.visitCardTitle, {maxWidth: '100%', flexWrap: 'wrap', wordBreak: 'break-word'}]}>{punto.nombre}</Text>
+                              <Text style={[styles.visitCardTitle, {maxWidth: '100%', flexWrap: 'wrap'}]}>{punto.nombre}</Text>
                               <View style={styles.visitCardRow}>
                                 <Text style={styles.visitCardSubIcon}>📍</Text>
-                                <Text style={[styles.visitCardSubtitle, {maxWidth: '100%', flexWrap: 'wrap', wordBreak: 'break-word'}]}>{punto.direccion}</Text>
+                                <Text style={[styles.visitCardSubtitle, {maxWidth: '100%', flexWrap: 'wrap'}]}>{punto.direccion}</Text>
                               </View>
                               <View style={styles.visitCardRow}>
                                 <Text style={styles.visitCardTipo}>{punto.tipo}</Text>
@@ -767,39 +756,129 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                     ))}
                   </View>
                 )}
-                {clientesFirebase.length === 0 ? (
-                  <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No hay clientes disponibles.</Text>
+                {/* Barra de búsqueda */}
+                <View style={{ marginBottom: 12 }}>
+                  <TextInput
+                    style={{
+                      backgroundColor: darkMode ? '#23242a' : '#fff',
+                      color: darkMode ? '#fff' : '#222',
+                      borderColor: darkMode ? '#333' : '#e3e8f0',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                    }}
+                    placeholder="Buscar cliente por nombre..."
+                    placeholderTextColor={darkMode ? '#888' : '#aaa'}
+                    value={busquedaCliente}
+                    onChangeText={setBusquedaCliente}
+                  />
+                </View>
+                {/* Lista de clientes paginados y filtrados */}
+                {clientesFiltrados.length === 0 ? (
+                  <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No se encontraron clientes.</Text>
                 ) : (
-                  clientesFirebase.map((cliente: any) => (
-                    <View key={cliente.id} style={[styles.visitCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }] }>
-                      <View style={styles.visitCardLeft}>
-                        <View style={[styles.visitCardIconBox, darkMode && { backgroundColor: '#23242a' }] }>
-                          <Text style={[styles.visitCardIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.visitCardTitle, darkMode && { color: '#fff' }]}>{cliente.nombre || ''}</Text>
-                          <View style={styles.visitCardRow}>
-                            <Text style={styles.visitCardSubIcon}>📍</Text>
-                            <Text style={[styles.visitCardSubtitle, darkMode && { color: '#bbb' }]}>{cliente.direccion || ''}</Text>
+                  <>
+                    {clientesPaginados.map((cliente: any) => (
+                      <View key={cliente.id} style={[styles.visitCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }, {flexWrap: 'wrap', flexDirection: 'row', alignItems: 'stretch'}]}>
+                        <View style={[styles.visitCardLeft, {minWidth: 0, flex: 3}]}> 
+                          <View style={[styles.visitCardIconBox, darkMode && { backgroundColor: '#23242a' }] }>
+                            <Text style={[styles.visitCardIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
                           </View>
-                          {cliente.tipo ? (
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.visitCardTitle, darkMode && { color: '#fff' }, {flexWrap: 'wrap', minWidth: 0}]} numberOfLines={2} ellipsizeMode="tail">{cliente.nombre || ''}</Text>
                             <View style={styles.visitCardRow}>
-                              <Text style={[styles.visitCardTipo, darkMode && { color: '#bbb', backgroundColor: '#23242a' }]}>{cliente.tipo}</Text>
+                              <Text style={styles.visitCardSubIcon}>📍</Text>
+                              <Text style={[styles.visitCardSubtitle, darkMode && { color: '#bbb' }, {flexWrap: 'wrap', minWidth: 0}]} numberOfLines={2} ellipsizeMode="tail">{cliente.direccion || ''}</Text>
                             </View>
-                          ) : null}
+                            {cliente.tipo ? (
+                              <View style={styles.visitCardRow}>
+                                <Text style={[styles.visitCardTipo, darkMode && { color: '#bbb', backgroundColor: '#23242a' }]}>{cliente.tipo}</Text>
+                              </View>
+                            ) : null}
+                          </View>
                         </View>
+                        <View style={[styles.visitCardActions, {flex: 1, justifyContent: 'flex-end', alignItems: 'center', minWidth: 0}]}> 
+                          <TouchableOpacity style={styles.visitCardActionReady} onPress={() => seleccionarCliente(cliente)}>
+                            <Text style={styles.visitCardActionIcon}>✔️</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.visitCardActionCancel} onPress={() => setPuntosVisita((prev) => prev.filter((pv) => pv.id !== cliente.id))}>
+                            <Text style={styles.visitCardActionIcon}>⛔</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {/* Eliminar botón de foto en Selecciona Cliente */}
                       </View>
-                      <View style={styles.visitCardActions}>
-                        <TouchableOpacity style={styles.visitCardActionReady} onPress={() => seleccionarCliente(cliente)}>
-                          <Text style={styles.visitCardActionIcon}>✔️</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.visitCardActionCancel} onPress={() => setPuntosVisita((prev) => prev.filter((pv) => pv.id !== cliente.id))}>
-                          <Text style={styles.visitCardActionIcon}>⛔</Text>
-                        </TouchableOpacity>
-                      </View>
-                      {/* Eliminar botón de foto en Selecciona Cliente */}
+                    ))}
+                    {/* Paginación tipo 1,2,3... */}
+                    {/* Paginación compacta: solo 3 botones y avance */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16, flexWrap: 'wrap', gap: 4 }}>
+                      {(() => {
+                        // Determinar el grupo de paginación actual
+                        const grupo = Math.floor((paginaClientes - 1) / 3);
+                        const inicio = grupo * 3 + 1;
+                        const fin = Math.min(inicio + 2, totalPaginas);
+                        const paginas = [];
+                        for (let i = inicio; i <= fin; i++) {
+                          paginas.push(i);
+                        }
+                        return (
+                          <>
+                            {paginas.map((num) => (
+                              <TouchableOpacity
+                                key={num}
+                                style={{
+                                  backgroundColor: paginaClientes === num ? (darkMode ? '#1976d2' : '#1976d2') : (darkMode ? '#23242a' : '#fff'),
+                                  borderColor: darkMode ? '#333' : '#1976d2',
+                                  borderWidth: 1,
+                                  borderRadius: 6,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  marginHorizontal: 2,
+                                }}
+                                onPress={() => setPaginaClientes(num)}
+                              >
+                                <Text style={{ color: paginaClientes === num ? '#fff' : (darkMode ? '#fff' : '#1976d2'), fontWeight: 'bold' }}>{num}</Text>
+                              </TouchableOpacity>
+                            ))}
+                            {/* Botón avanzar */}
+                            {fin < totalPaginas && (
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: darkMode ? '#23242a' : '#fff',
+                                  borderColor: darkMode ? '#333' : '#1976d2',
+                                  borderWidth: 1,
+                                  borderRadius: 6,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  marginHorizontal: 2,
+                                }}
+                                onPress={() => setPaginaClientes(fin + 1)}
+                              >
+                                <Text style={{ color: darkMode ? '#fff' : '#1976d2', fontWeight: 'bold' }}>{'>'}</Text>
+                              </TouchableOpacity>
+                            )}
+                            {/* Botón retroceder */}
+                            {grupo > 0 && (
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: darkMode ? '#23242a' : '#fff',
+                                  borderColor: darkMode ? '#333' : '#1976d2',
+                                  borderWidth: 1,
+                                  borderRadius: 6,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  marginHorizontal: 2,
+                                }}
+                                onPress={() => setPaginaClientes(inicio - 3)}
+                              >
+                                <Text style={{ color: darkMode ? '#fff' : '#1976d2', fontWeight: 'bold' }}>{'<'}</Text>
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+                      })()}
                     </View>
-                  ))
+                  </>
                 )}
                 {clienteSeleccionado && (
                   <View style={styles.detalleBox}>
