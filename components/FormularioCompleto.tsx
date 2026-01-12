@@ -154,9 +154,25 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
       } else if (completadas.length > 0) {
         statusHoy = 'en-progreso';
       }
-      // ...existing code...
-    }
-    else if (idxHoy >= 0) {
+      // Guardar/actualizar el historial del día en Firestore
+      try {
+        await setDoc(doc(db, 'historialRutas', todayKey), {
+          id: todayKey,
+          fecha: todayKey,
+          status: statusHoy,
+          puntos: todosClientes,
+        });
+      } catch (e) {
+        console.error('Error guardando historial en Firestore', e);
+      }
+      // Actualizar el estado local
+      if (idxHoy >= 0) {
+        nuevoHistorial[idxHoy] = { id: todayKey, nombre: 'Ruta ' + todayKey, fecha: todayKey, status: statusHoy, puntos: todosClientes };
+      } else {
+        nuevoHistorial.push({ id: todayKey, nombre: 'Ruta ' + todayKey, fecha: todayKey, status: statusHoy, puntos: todosClientes });
+      }
+      setHistorialRutas([...nuevoHistorial]);
+    } else if (idxHoy >= 0) {
       // Si ya no hay visitas hoy, eliminar el registro del día
       nuevoHistorial.splice(idxHoy, 1);
       setHistorialRutas([...nuevoHistorial]);
@@ -493,7 +509,7 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
     const promedioDiario = puntosVisita.length / totalDias;
 
     // Rutas completadas: contar días en historialRutas con status 'completada'
-    const rutasCompletadas = historialRutas.filter((r: any) => r.status === 'completada').length;
+      const rutasCompletadas = historialRutas.filter((r: any) => r.status === 'completada' || r.status === 'completed').length;
 
     setMetrics({
       visitasHoy,
@@ -675,67 +691,49 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                   <Text style={[styles.emptyText, darkMode && { color: '#bbb' }]}>No hay puntos de visita asignados.</Text>
                 ) : (
                   puntosVisita.map((punto: any) => (
-                    <View key={punto.id} style={styles.visitCard}>
-                      <View key={punto.id} style={[styles.visitCard, {flexDirection: 'column', maxWidth: 600, width: '100%'}]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'flex-start', width: '100%' }}>
-                          <View style={styles.visitCardLeft}>
-                            <View style={styles.visitCardIconBox}>
-                              <Text style={styles.visitCardIcon}>🧑‍💼</Text>
-                            </View>
-                            <View style={{ flex: 1, minWidth: 0 }}>
-                              <Text style={[styles.visitCardTitle, {maxWidth: '100%', flexWrap: 'wrap'}]}>{punto.nombre}</Text>
-                              <View style={styles.visitCardRow}>
-                                <Text style={styles.visitCardSubIcon}>📍</Text>
-                                <Text style={[styles.visitCardSubtitle, {maxWidth: '100%', flexWrap: 'wrap'}]}>{punto.direccion}</Text>
-                              </View>
-                              <View style={styles.visitCardRow}>
-                                <Text style={styles.visitCardTipo}>{punto.tipo}</Text>
-                              </View>
-                            </View>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', minWidth: 120 }}>
-                            <View style={styles.visitCardInfoBox}>
-                              <View style={styles.visitCardTimeBox}>
-                                <Text style={styles.visitCardTimeIcon}>⏰</Text>
-                                <Text style={styles.visitCardTimeText}>30 min</Text>
-                              </View>
-                              <Text style={styles.visitCardStatus}>
-                                {punto.status === 'completed' ? 'Completada' : 'Pendiente'}
-                              </Text>
-                              <Text style={styles.visitCardArrow}>→</Text>
-                            </View>
-                          </View>
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, alignSelf: 'flex-end', flexWrap: 'wrap' }}>
-                          <TouchableOpacity
-                            style={[styles.visitCardActionReady, {backgroundColor: '#e6f0ff', borderColor: '#b8d4ff', borderWidth: 1}]}
-                            onPress={async () => {
-                              setPuntosVisita((prev) => {
-                                const nuevos = prev.map((pv) =>
-                                  pv.id === punto.id ? { ...pv, status: 'completed' } : pv
-                                );
-                                return nuevos;
-                              });
-                              setTimeout(() => {
-                                syncAndSaveHistorial();
-                              }, 100);
-                            }}
-                          >
-                            <Text style={styles.visitCardActionIcon}>✔️</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.visitCardActionCancel, {backgroundColor: '#fff0f0', borderColor: '#ffb8b8', borderWidth: 1}]}
-                            onPress={() => {
-                              setPuntosVisita((prev) => prev.filter((pv) => pv.id !== punto.id));
-                            }}
-                          >
-                            <Text style={styles.visitCardActionIcon}>⛔</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={[styles.smallFotoBtn, {backgroundColor: '#f5f6fa', borderColor: '#e0e0e0', borderWidth: 1}]} onPress={pickImageFromGallery}>
-                            <Text style={styles.smallFotoIcon}>📷</Text>
-                            <Text style={styles.smallFotoText}>Foto</Text>
-                          </TouchableOpacity>
-                        </View>
+                    <View key={punto.id} style={{ marginBottom: 24 }}>
+                      <View style={[styles.detalleBox, { marginTop: 0, marginBottom: 0 }]}> 
+                        <Text style={styles.detalleTitle}>Detalles del Cliente</Text>
+                        <Text>
+                          <Text style={{ fontWeight: 'bold' }}>{punto.nombre || punto.clientName || ''}</Text>{'  '}
+                          <Text style={{ color: punto.status === 'completed' ? '#1976d2' : '#e63946', fontWeight: 'bold' }}>
+                            {punto.status === 'completed' ? ' (Completada)' : ' (Pendiente)'}
+                          </Text>
+                        </Text>
+                        <Text><Text style={{ fontWeight: 'bold' }}>Dirección: </Text>{punto.direccion || ''}</Text>
+                        {punto.rif && <Text><Text style={{ fontWeight: 'bold' }}>RIF: </Text>{punto.rif}</Text>}
+                        <Text><Text style={{ fontWeight: 'bold' }}>Tipo: </Text>{punto.tipo}</Text>
+                      </View>
+                      {/* Botones de acción debajo del cuadro */}
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+                        <TouchableOpacity
+                          style={[styles.visitCardActionReady, {backgroundColor: '#e6f0ff', borderColor: '#b8d4ff', borderWidth: 1}]}
+                          onPress={async () => {
+                            setPuntosVisita((prev) => {
+                              const nuevos = prev.map((pv) =>
+                                pv.id === punto.id ? { ...pv, status: 'completed' } : pv
+                              );
+                              return nuevos;
+                            });
+                            setTimeout(() => {
+                              syncAndSaveHistorial();
+                            }, 100);
+                          }}
+                        >
+                          <Text style={styles.visitCardActionIcon}>✔️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.visitCardActionCancel, {backgroundColor: '#fff0f0', borderColor: '#ffb8b8', borderWidth: 1}]}
+                          onPress={() => {
+                            setPuntosVisita((prev) => prev.filter((pv) => pv.id !== punto.id));
+                          }}
+                        >
+                          <Text style={styles.visitCardActionIcon}>⛔</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.smallFotoBtn, {backgroundColor: '#f5f6fa', borderColor: '#e0e0e0', borderWidth: 1}]} onPress={pickImageFromGallery}>
+                          <Text style={styles.smallFotoIcon}>📷</Text>
+                          <Text style={styles.smallFotoText}>Foto</Text>
+                        </TouchableOpacity>
                       </View>
                     </View>
                   ))
@@ -747,7 +745,6 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
           {/* TAB CLIENTES */}
           {activeTab === 'clientes' && (
               <View style={styles.tabContent}>
-                <Text style={styles.visitPointsTitle}>{clientesFirebase.length} clientes disponibles</Text>
                 {errores.length > 0 && (
                   <View style={{ backgroundColor: '#fee', padding: 8, borderRadius: 8, marginBottom: 8 }}>
 
@@ -780,33 +777,40 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                 ) : (
                   <>
                     {clientesPaginados.map((cliente: any) => (
-                      <View key={cliente.id} style={[styles.visitCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }, {flexWrap: 'wrap', flexDirection: 'row', alignItems: 'stretch'}]}>
-                        <View style={[styles.visitCardLeft, {minWidth: 0, flex: 3}]}> 
-                          <View style={[styles.visitCardIconBox, darkMode && { backgroundColor: '#23242a' }] }>
-                            <Text style={[styles.visitCardIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
-                          </View>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[styles.visitCardTitle, darkMode && { color: '#fff' }, {flexWrap: 'wrap', minWidth: 0}]} numberOfLines={2} ellipsizeMode="tail">{cliente.nombre || ''}</Text>
-                            <View style={styles.visitCardRow}>
-                              <Text style={styles.visitCardSubIcon}>📍</Text>
-                              <Text style={[styles.visitCardSubtitle, darkMode && { color: '#bbb' }, {flexWrap: 'wrap', minWidth: 0}]} numberOfLines={2} ellipsizeMode="tail">{cliente.direccion || ''}</Text>
+                      <View key={cliente.id} style={[styles.visitCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }, {flexDirection: 'column', alignItems: 'stretch', padding: 0}]}> 
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                            <View style={[styles.visitCardIconBox, darkMode && { backgroundColor: '#23242a' }] }>
+                              <Text style={[styles.visitCardIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
                             </View>
-                            {cliente.tipo ? (
-                              <View style={styles.visitCardRow}>
-                                <Text style={[styles.visitCardTipo, darkMode && { color: '#bbb', backgroundColor: '#23242a' }]}>{cliente.tipo}</Text>
-                              </View>
-                            ) : null}
+                            <Text
+                              style={[styles.visitCardTitle, darkMode && { color: '#fff' }, { flex: 1, minWidth: 0, fontSize: 15 }]}
+                            >
+                              {cliente.nombre || ''}
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <TouchableOpacity style={styles.visitCardActionReady} onPress={() => seleccionarCliente(cliente)}>
+                              <Text style={styles.visitCardActionIcon}>✔️</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.visitCardActionCancel} onPress={() => setPuntosVisita((prev) => prev.filter((pv) => pv.id !== cliente.id))}>
+                              <Text style={styles.visitCardActionIcon}>⛔</Text>
+                            </TouchableOpacity>
                           </View>
                         </View>
-                        <View style={[styles.visitCardActions, {flex: 1, justifyContent: 'flex-end', alignItems: 'center', minWidth: 0}]}> 
-                          <TouchableOpacity style={styles.visitCardActionReady} onPress={() => seleccionarCliente(cliente)}>
-                            <Text style={styles.visitCardActionIcon}>✔️</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.visitCardActionCancel} onPress={() => setPuntosVisita((prev) => prev.filter((pv) => pv.id !== cliente.id))}>
-                            <Text style={styles.visitCardActionIcon}>⛔</Text>
-                          </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 4, width: '100%' }}>
+                          <Text style={[styles.visitCardSubIcon, { fontSize: 13 }]}>📍</Text>
+                          <Text
+                            style={[styles.visitCardSubtitle, darkMode && { color: '#bbb' }, { flex: 1, minWidth: 0, fontSize: 13 }]}
+                          >
+                            {cliente.direccion || ''}
+                          </Text>
                         </View>
-                        {/* Eliminar botón de foto en Selecciona Cliente */}
+                        {cliente.tipo ? (
+                          <View style={{ flexDirection: 'row', marginTop: 2, width: '100%' }}>
+                            <Text style={[styles.visitCardTipo, darkMode && { color: '#bbb', backgroundColor: '#23242a' }, { fontSize: 12 }]}>{cliente.tipo}</Text>
+                          </View>
+                        ) : null}
                       </View>
                     ))}
                     {/* Paginación tipo 1,2,3... */}
@@ -880,19 +884,6 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                     </View>
                   </>
                 )}
-                {clienteSeleccionado && (
-                  <View style={styles.detalleBox}>
-                    <Text style={styles.detalleTitle}>Detalles del Cliente</Text>
-                    <Text>{`Nombre: ${clienteSeleccionado.nombre || ''}`}</Text>
-                    <Text>{`Dirección: ${clienteSeleccionado.direccion || ''}`}</Text>
-                    <Text>{`RIF: ${clienteSeleccionado.rif || ''}`}</Text>
-                    <Text>{`Tipo: ${clienteSeleccionado.tipo || ''}`}</Text>
-                    <TouchableOpacity style={styles.smallFotoBtn} onPress={pickImageFromGallery}>
-                      <Text style={styles.smallFotoIcon}>📷</Text>
-                      <Text style={styles.smallFotoText}>Foto</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
               </View>
           )}
 
@@ -907,45 +898,59 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
               </View>
               {/* Calendario real vinculado a historialRutas */}
               <View style={styles.calendarGrid}>
-                {[0,1,2,3,4].map((week) => (
-                  <View key={week} style={styles.calendarRow}>
-                    {[0,1,2,3,4,5,6].map((day) => {
-                      const dayNum = week*7+day+1;
-                      if (dayNum > 31) return <View key={day} style={styles.calendarCell} />;
-                      // Fecha en formato YYYY-MM-DD
-                      const today = new Date();
-                      const yyyy = today.getFullYear();
-                      const mm = String(today.getMonth() + 1).padStart(2, '0');
-                      const dd = String(dayNum).padStart(2, '0');
-                      const dateKey = `${yyyy}-${mm}-${dd}`;
-
-                      // Buscar el registro de ese día en historialRutas
-                      const registroDia = historialRutas.find(r => r.fecha && r.fecha.substring(0,10) === dateKey);
-                      let cellStyle = { ...styles.calendarCell };
-                      let textStyle = styles.calendarCellText;
-                      let icons = null;
-                      if (registroDia) {
-                        if (registroDia.status && registroDia.status.trim().toLowerCase() === 'completada') {
-                          cellStyle = { ...cellStyle, ...styles.calendarCellDone };
-                          icons = <Text>🧾 {(registroDia.puntos ? registroDia.puntos.length : '')}</Text>;
-                        } else if (registroDia.status && registroDia.status.trim().toLowerCase() === 'en-progreso') {
-                          cellStyle = { ...cellStyle, ...styles.calendarCellProgress };
-                          textStyle = styles.calendarCellTextProgress;
+                {(() => {
+                  const today = new Date();
+                  const yyyy = today.getFullYear();
+                  const mm = String(today.getMonth() + 1).padStart(2, '0');
+                  // Primer día del mes
+                  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+                  // getDay(): 0=Domingo, 1=Lunes, ..., 6=Sábado
+                  let startDay = firstDay.getDay();
+                  // Ajustar para que lunes sea 0
+                  startDay = (startDay === 0) ? 6 : startDay - 1;
+                  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+                  const weeks = [];
+                  let dayNum = 1;
+                  for (let week = 0; week < 6; week++) {
+                    const days = [];
+                    for (let day = 0; day < 7; day++) {
+                      if (week === 0 && day < startDay) {
+                        days.push(<View key={`empty-${week}-${day}`} style={styles.calendarCell} />);
+                      } else if (dayNum > daysInMonth) {
+                        days.push(<View key={`empty-${week}-${day}`} style={styles.calendarCell} />);
+                      } else {
+                        const dd = String(dayNum).padStart(2, '0');
+                        const dateKey = `${yyyy}-${mm}-${dd}`;
+                        const registroDia = historialRutas.find(r => r.fecha && r.fecha.substring(0,10) === dateKey);
+                        let cellStyle = { ...styles.calendarCell };
+                        let textStyle = styles.calendarCellText;
+                        if (registroDia) {
+                          if (registroDia.status && registroDia.status.trim().toLowerCase() === 'completada') {
+                            cellStyle = { ...cellStyle, ...styles.calendarCellDone };
+                          } else if (registroDia.status && registroDia.status.trim().toLowerCase() === 'en-progreso') {
+                            cellStyle = { ...cellStyle, ...styles.calendarCellProgress };
+                            textStyle = styles.calendarCellTextProgress;
+                          }
                         }
+                        // Si es el día actual y está en progreso, prioriza el color de progreso
+                        if (parseInt(dd) === today.getDate() && registroDia && registroDia.status && registroDia.status.trim().toLowerCase() === 'en-progreso') {
+                          cellStyle = { ...cellStyle, ...styles.calendarCellProgress, ...styles.calendarCellToday };
+                          textStyle = styles.calendarCellTextProgress;
+                        } else if (parseInt(dd) === today.getDate()) {
+                          cellStyle = { ...cellStyle, ...styles.calendarCellToday };
+                        }
+                        days.push(
+                          <View key={dayNum} style={cellStyle}>
+                            <Text style={textStyle}>{dayNum}</Text>
+                          </View>
+                        );
+                        dayNum++;
                       }
-                      // Día actual: sumar borde azul
-                      if (parseInt(dd) === today.getDate()) {
-                        cellStyle = { ...cellStyle, ...styles.calendarCellToday };
-                      }
-                      return (
-                        <View key={day} style={cellStyle}>
-                          <Text style={textStyle}>{dayNum}</Text>
-                          {icons ? <View>{icons}</View> : null}
-                        </View>
-                      );
-                    })}
-                  </View>
-                ))}
+                    }
+                    weeks.push(<View key={week} style={styles.calendarRow}>{days}</View>);
+                  }
+                  return weeks;
+                })()}
               </View>
               {/* Leyenda */}
               <View style={[styles.calendarLegendBox, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}> 
@@ -956,12 +961,6 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
                     <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#d1f7d6', borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Con actividad completada</Text></View>
                     <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor:'#fff3cd', borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Rutas en progreso</Text></View>
                     <View style={styles.calendarLegendItem}><View style={[styles.calendarLegendColor, {backgroundColor: darkMode ? '#23242a' : '#f5f6fa', borderWidth:1, borderColor: darkMode ? '#333' : '#e0e0e0'}]} /> <Text style={darkMode ? { color: '#fff' } : {}}>Sin actividad</Text></View>
-                  </View>
-                  <View style={styles.calendarLegendCol}>
-                    <Text style={[styles.calendarLegendSubtitle, darkMode && { color: '#fff' }]}>Símbolos:</Text>
-                    <View style={styles.calendarLegendItem}><Text>🗺️</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Rutas completadas</Text></View>
-                    <View style={styles.calendarLegendItem}><Text>🧾</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Visitas realizadas</Text></View>
-                    <View style={styles.calendarLegendItem}><Text style={{color:'#1976d2'}}>●</Text> <Text style={darkMode ? { color: '#fff' } : {}}>Día actual</Text></View>
                   </View>
                 </View>
               </View>
@@ -977,31 +976,31 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
         transparent={true}
         onRequestClose={() => setShowProspectoModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.prospectoModalCard}>
+        <View style={[styles.modalOverlay, darkMode && { backgroundColor: 'rgba(24,26,32,0.85)' }] }>
+          <View style={[styles.prospectoModalCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }] }>
             <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={[styles.prospectoIconCircle, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}>
+              <View style={[styles.prospectoIconCircle, darkMode && { backgroundColor: '#333', borderColor: '#444' }]}> 
                 <Text style={[styles.prospectoIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
               </View>
               <Text style={[styles.prospectoModalTitle, darkMode && { color: '#fff' }]}>Registrar Cliente Prospecto</Text>
             </View>
             <Text style={[styles.prospectoModalSubtitle, darkMode && { color: '#bbb' }]}>¿Encontraste un nuevo punto de venta?</Text>
             <Text style={[styles.prospectoModalText, darkMode && { color: '#bbb' }]}>Registra clientes potenciales que encuentres durante tu ruta para futuras visitas</Text>
-            <TouchableOpacity style={[styles.prospectoModalButton, darkMode && { backgroundColor: '#333' }]} onPress={() => { setShowProspectoForm(true); setShowProspectoModal(false); }}>
+            <TouchableOpacity style={[styles.prospectoModalButton, darkMode && { backgroundColor: '#1976d2' }]} onPress={() => { setShowProspectoForm(true); setShowProspectoModal(false); }}>
               <Text style={[styles.prospectoModalButtonText, darkMode && { color: '#fff' }]}>Registrar Nuevo Prospecto</Text>
             </TouchableOpacity>
-            <View style={[styles.prospectoInfoBox, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }]}>
+            <View style={[styles.prospectoInfoBox, darkMode && { backgroundColor: '#181a20', borderColor: '#333' }] }>
               <Text style={[styles.prospectoInfoTitle, darkMode && { color: '#fff' }]}>¿Qué información necesitas capturar?</Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏪 Nombre del negocio *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>📍 Dirección exacta *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏷️ Tipo de negocio *</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📞 Teléfono (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📷 Foto del establecimiento (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>💬 Comentarios adicionales (opcional)</Text></Text>
-              <Text style={styles.prospectoInfoItem}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📡 Ubicación GPS automática</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#fff' }]}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏪 Nombre del negocio *</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#fff' }]}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>📍 Dirección exacta *</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#fff' }]}>• <Text style={{color: darkMode ? '#e63946' : '#e63946'}}>🏷️ Tipo de negocio *</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#bbb' }]}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📞 Teléfono (opcional)</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#bbb' }]}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📷 Foto del establecimiento (opcional)</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#bbb' }]}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>💬 Comentarios adicionales (opcional)</Text></Text>
+              <Text style={[styles.prospectoInfoItem, darkMode && { color: '#bbb' }]}>• <Text style={{color: darkMode ? '#bbb' : '#6c757d'}}>📡 Ubicación GPS automática</Text></Text>
               <Text style={[styles.prospectoInfoNote, darkMode && { color: '#bbb' }]}>* Campos obligatorios</Text>
             </View>
-            <TouchableOpacity style={[styles.prospectoModalClose, darkMode && { backgroundColor: '#333' }]} onPress={() => setShowProspectoModal(false)}>
+            <TouchableOpacity style={[styles.prospectoModalClose, darkMode && { backgroundColor: '#23242a' }]} onPress={() => setShowProspectoModal(false)}>
               <Text style={[styles.prospectoModalCloseText, darkMode && { color: '#fff' }]}>Cerrar</Text>
             </TouchableOpacity>
           </View>
@@ -1015,79 +1014,91 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
         transparent={true}
         onRequestClose={() => setShowProspectoForm(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.prospectoFormCard}>
+        <View style={[styles.modalOverlay, darkMode && { backgroundColor: 'rgba(24,26,32,0.85)' }] }>
+          <View style={[styles.prospectoFormCard, darkMode && { backgroundColor: '#23242a', borderColor: '#333' }] }>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, justifyContent: 'space-between', width: '100%' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={styles.prospectoIcon}>🧑‍💼</Text>
-                <Text style={styles.prospectoFormTitle}> Registrar Cliente Prospecto</Text>
+                <Text style={[styles.prospectoIcon, darkMode && { color: '#fff' }]}>🧑‍💼</Text>
+                <Text style={[styles.prospectoFormTitle, darkMode && { color: '#fff' }]}> Registrar Cliente Prospecto</Text>
               </View>
               <TouchableOpacity onPress={() => setShowProspectoForm(false)}>
-                <Text style={{ fontSize: 22, color: '#222' }}>×</Text>
+                <Text style={{ fontSize: 22, color: darkMode ? '#fff' : '#222' }}>×</Text>
               </TouchableOpacity>
             </View>
             <Text style={styles.prospectoFormSubtitle}>Captura información de un nuevo punto de venta potencial</Text>
+                        <Text style={[styles.prospectoFormSubtitle, darkMode && { color: '#bbb' }]}>Captura información de un nuevo punto de venta potencial</Text>
             {/* Foto */}
             <Text style={styles.prospectoFormLabel}>Foto del Establecimiento (Opcional)</Text>
+                        <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Foto del Establecimiento (Opcional)</Text>
             <TouchableOpacity style={styles.prospectoFotoBtn} onPress={pickImageFromGallery}>
-              <Text style={styles.prospectoFotoIcon}>📷</Text>
-              <Text style={styles.prospectoFotoText}>Tomar Foto</Text>
+              <Text style={[styles.prospectoFotoIcon, darkMode && { color: '#fff' }]}>📷</Text>
+              <Text style={[styles.prospectoFotoText, darkMode && { color: '#fff' }]}>Tomar Foto</Text>
             </TouchableOpacity>
             {foto ? (
               <Image source={{ uri: foto }} style={{ width: 120, height: 120, borderRadius: 10, alignSelf: 'center', marginVertical: 8 }} />
             ) : null}
             {/* Nombre */}
             <Text style={styles.prospectoFormLabel}>Nombre del Negocio *</Text>
+            <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Nombre del Negocio *</Text>
             <TextInput
-              style={styles.prospectoInput}
+              style={[styles.prospectoInput, darkMode && { backgroundColor: '#181a20', color: '#fff', borderColor: '#444' }]}
               placeholder="Ej: Farmacia San José"
+              placeholderTextColor={darkMode ? '#888' : undefined}
               value={nombreNegocio}
               onChangeText={setNombreNegocio}
             />
             {/* Dirección */}
             <Text style={styles.prospectoFormLabel}>Dirección *</Text>
+            <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Dirección *</Text>
             <TextInput
-              style={[styles.prospectoInput, { minHeight: 48 }]}
+              style={[styles.prospectoInput, { minHeight: 48 }, darkMode && { backgroundColor: '#181a20', color: '#fff', borderColor: '#444' }]}
               placeholder="Dirección completa del establecimiento"
+              placeholderTextColor={darkMode ? '#888' : undefined}
               value={direccionNegocio}
               onChangeText={setDireccionNegocio}
               multiline
             />
             {/* Teléfono */}
             <Text style={styles.prospectoFormLabel}>Teléfono (Opcional)</Text>
+            <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Teléfono (Opcional)</Text>
             <TextInput
-              style={styles.prospectoInput}
+              style={[styles.prospectoInput, darkMode && { backgroundColor: '#181a20', color: '#fff', borderColor: '#444' }]}
               placeholder="Ej: 0414-1234567"
+              placeholderTextColor={darkMode ? '#888' : undefined}
               value={telefonoNegocio}
               onChangeText={setTelefonoNegocio}
               keyboardType="phone-pad"
             />
             {/* Tipo de Negocio */}
             <Text style={styles.prospectoFormLabel}>Tipo de Negocio *</Text>
+            <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Tipo de Negocio *</Text>
             <View style={styles.prospectoSelectBox}>
               <TextInput
-                style={styles.prospectoInput}
+                style={[styles.prospectoInput, darkMode && { backgroundColor: '#181a20', color: '#fff', borderColor: '#444' }]}
                 placeholder="Selecciona el tipo de negocio"
+                placeholderTextColor={darkMode ? '#888' : undefined}
                 value={tipoNegocio}
                 onChangeText={setTipoNegocio}
               />
             </View>
             {/* Comentarios */}
             <Text style={styles.prospectoFormLabel}>Comentarios Adicionales</Text>
+            <Text style={[styles.prospectoFormLabel, darkMode && { color: '#fff' }]}>Comentarios Adicionales</Text>
             <TextInput
-              style={[styles.prospectoInput, { minHeight: 44 }]}
+              style={[styles.prospectoInput, { minHeight: 44 }, darkMode && { backgroundColor: '#181a20', color: '#fff', borderColor: '#444' }]}
               placeholder="Observaciones, horarios, contactos, etc..."
+              placeholderTextColor={darkMode ? '#888' : undefined}
               value={comentarios}
               onChangeText={setComentarios}
               multiline
             />
             {/* Botones */}
             <View style={styles.prospectoFormBtnRow}>
-              <TouchableOpacity style={styles.prospectoFormCancelBtn} onPress={() => setShowProspectoForm(false)}>
-                <Text style={styles.prospectoFormCancelText}>Cancelar</Text>
+              <TouchableOpacity style={[styles.prospectoFormCancelBtn, darkMode && { backgroundColor: '#333' }]} onPress={() => setShowProspectoForm(false)}>
+                <Text style={[styles.prospectoFormCancelText, darkMode && { color: '#fff' }]}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.prospectoFormRegisterBtn}>
-                <Text style={styles.prospectoFormRegisterText}>Registrar</Text>
+              <TouchableOpacity style={[styles.prospectoFormRegisterBtn, darkMode && { backgroundColor: '#1976d2' }]}>
+                <Text style={[styles.prospectoFormRegisterText, darkMode && { color: '#fff' }]}>Registrar</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1098,13 +1109,21 @@ export default function FormularioCompleto({ darkMode = false }: { darkMode?: bo
 }
 
 const styles = StyleSheet.create({
+// Removed duplicate visitCard style
+// Removed duplicate visitCardTitle style
+// Removed duplicate visitCardSubtitle style
+// Removed duplicate visitCardTipo style
+  visitCardSubIcon: {
+    fontSize: 13,
+    marginRight: 2,
+  },
 // ...existing code...
   smallFotoBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f5f6fa',
-    borderRadius: 6,
-    paddingVertical: 4,
+    borderRadius: 8, // igual que los otros botones
+    paddingVertical: 8, // igual que los otros botones
     paddingHorizontal: 10,
     alignSelf: 'flex-start',
     marginTop: 8,
@@ -1472,11 +1491,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     gap: 4,
   },
-  visitCardSubIcon: {
-    fontSize: 15,
-    marginRight: 2,
-    color: '#1976d2',
-  },
+// Removed duplicate visitCardSubIcon style
   visitCardSubtitle: {
     fontSize: 15,
     color: '#6c757d',
